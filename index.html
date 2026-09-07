@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>INV-1382 camera probe</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --ink: #14161a;
+        --muted: #5c6470;
+        --line: #d9dde3;
+        --pass: #0f7b34;
+        --fail: #b3261e;
+        --run: #8a5a00;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161a;
+          --card: #1e2126;
+          --ink: #f2f4f7;
+          --muted: #a6aeba;
+          --line: #333941;
+          --pass: #5ddb8b;
+          --fail: #ff8a80;
+          --run: #ffcc66;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px 16px 48px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 17px;
+        margin: 0 0 2px;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 20px;
+        word-break: break-all;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 2px 0 12px;
+      }
+      button {
+        font: inherit;
+        font-weight: 600;
+        color: #fff;
+        background: #1a56db;
+        border: 0;
+        border-radius: 10px;
+        padding: 14px 18px;
+        width: 100%;
+        margin-bottom: 8px;
+        -webkit-appearance: none;
+      }
+      button.secondary {
+        background: #5c6470;
+      }
+      button:disabled {
+        opacity: 0.45;
+      }
+      input[type="file"] {
+        display: block;
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 8px;
+        background: transparent;
+        color: var(--ink);
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+      }
+      .status {
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        margin-bottom: 6px;
+      }
+      .idle {
+        color: var(--muted);
+      }
+      .running {
+        color: var(--run);
+      }
+      .pass {
+        color: var(--pass);
+      }
+      .fail {
+        color: var(--fail);
+      }
+      pre {
+        margin: 0;
+        padding: 10px;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      pre:empty {
+        display: none;
+      }
+      video,
+      img.shot {
+        display: block;
+        width: 100%;
+        max-height: 260px;
+        object-fit: contain;
+        background: #000;
+        border-radius: 8px;
+        margin-bottom: 8px;
+      }
+      video:not([data-live]),
+      img.shot:not([src]) {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>INV-1382 camera probe</h1>
+    <p class="sub">Build v1 · 2026-09-07 · <span id="origin"></span></p>
+
+    <section>
+      <h2>Environment</h2>
+      <p class="hint">Captured on load. Screenshot this along with each probe result.</p>
+      <pre id="diagnostics">collecting…</pre>
+    </section>
+
+    <section>
+      <h2>Probe A — getUserMedia</h2>
+      <p class="hint">Live camera stream. This is what a WebRTC-based ID check needs.</p>
+      <button id="startCam">Start camera</button>
+      <button id="stopCam" class="secondary" disabled>Stop camera</button>
+      <video id="preview" playsinline autoplay muted></video>
+      <span class="status idle" id="statusA">NOT RUN</span>
+      <pre id="resultA"></pre>
+    </section>
+
+    <section>
+      <h2>Probe B — capture attribute</h2>
+      <p class="hint">accept="image/*" capture="environment" — should open the camera directly.</p>
+      <input id="captureInput" type="file" accept="image/*" capture="environment" />
+      <img class="shot" id="shotB" alt="" />
+      <span class="status idle" id="statusB">NOT RUN</span>
+      <pre id="resultB"></pre>
+    </section>
+
+    <section>
+      <h2>Probe C — plain file input</h2>
+      <p class="hint">accept="image/*" with no capture — the gallery/file fallback.</p>
+      <input id="fileInput" type="file" accept="image/*" />
+      <img class="shot" id="shotC" alt="" />
+      <span class="status idle" id="statusC">NOT RUN</span>
+      <pre id="resultC"></pre>
+    </section>
+
+    <script>
+      (function () {
+        "use strict";
+
+        // Everything reports on-page: there is no console to read inside a native overlay browser.
+        function setStatus(id, state, label) {
+          var el = document.getElementById(id);
+          el.className = "status " + state;
+          el.textContent = label;
+        }
+
+        function write(id, lines) {
+          document.getElementById(id).textContent = lines.filter(Boolean).join("\n");
+        }
+
+        function describeError(err) {
+          if (!err) return "Unknown error (no error object)";
+          return [
+            "name:    " + (err.name || "(none)"),
+            "message: " + (err.message || "(none)"),
+            err.constraint ? "constraint: " + err.constraint : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+        }
+
+        function describeFile(file) {
+          return [
+            "name: " + file.name,
+            "type: " + (file.type || "(empty — the picker returned no MIME type)"),
+            "size: " + file.size + " bytes",
+            "lastModified: " + new Date(file.lastModified).toISOString(),
+          ].join("\n");
+        }
+
+        document.getElementById("origin").textContent = location.origin;
+
+        // ---- Environment -------------------------------------------------
+        (function diagnostics() {
+          var lines = [
+            "userAgent:      " + navigator.userAgent,
+            "origin:         " + location.origin,
+            "isSecureContext:" + window.isSecureContext,
+            "protocol:       " + location.protocol,
+            "in an iframe:   " + (window.top !== window.self),
+            "mediaDevices:   " + (navigator.mediaDevices ? "present" : "ABSENT"),
+            "getUserMedia:   " + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? "present" : "ABSENT"),
+            "viewport:       " + window.innerWidth + "x" + window.innerHeight + " @dpr " + (window.devicePixelRatio || 1),
+          ];
+          write("diagnostics", lines);
+
+          // Permissions API is itself a datapoint — Safari has historically not supported the "camera" name.
+          if (navigator.permissions && navigator.permissions.query) {
+            navigator.permissions
+              .query({ name: "camera" })
+              .then(function (res) {
+                lines.push("permission:     " + res.state);
+                write("diagnostics", lines);
+              })
+              .catch(function (err) {
+                lines.push("permission:     unavailable (" + (err && err.name) + ": " + (err && err.message) + ")");
+                write("diagnostics", lines);
+              });
+          } else {
+            lines.push("permission:     Permissions API not supported");
+            write("diagnostics", lines);
+          }
+
+          // Before permission is granted, labels are blank but the count still tells us cameras exist.
+          if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+            navigator.mediaDevices
+              .enumerateDevices()
+              .then(function (devices) {
+                var cams = devices.filter(function (d) {
+                  return d.kind === "videoinput";
+                });
+                lines.push("videoinput devices: " + cams.length + " (labels populate only after permission)");
+                write("diagnostics", lines);
+              })
+              .catch(function (err) {
+                lines.push("enumerateDevices failed: " + (err && err.name));
+                write("diagnostics", lines);
+              });
+          }
+        })();
+
+        // ---- Probe A: getUserMedia ---------------------------------------
+        var stream = null;
+        var video = document.getElementById("preview");
+        var startBtn = document.getElementById("startCam");
+        var stopBtn = document.getElementById("stopCam");
+
+        startBtn.addEventListener("click", function () {
+          setStatus("statusA", "running", "REQUESTING…");
+          write("resultA", ["Waiting for the permission prompt / stream."]);
+
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setStatus("statusA", "fail", "BLOCKED");
+            write("resultA", ["navigator.mediaDevices.getUserMedia is not available in this context.", "This is the API being absent entirely — not a denied permission."]);
+            return;
+          }
+
+          navigator.mediaDevices
+            .getUserMedia({ video: { facingMode: "environment" }, audio: false })
+            .then(function (s) {
+              stream = s;
+              video.srcObject = s;
+              video.setAttribute("data-live", "true");
+              stopBtn.disabled = false;
+
+              var track = s.getVideoTracks()[0];
+              var settings = track && track.getSettings ? track.getSettings() : {};
+              setStatus("statusA", "pass", "STREAM OK");
+              write("resultA", [
+                "track label: " + ((track && track.label) || "(no label)"),
+                "resolution:  " + (settings.width || "?") + "x" + (settings.height || "?"),
+                "facingMode:  " + (settings.facingMode || "(not reported)"),
+              ]);
+            })
+            .catch(function (err) {
+              setStatus("statusA", "fail", "FAILED");
+              write("resultA", [describeError(err), "", "NotAllowedError = permission denied or dismissed.", "NotFoundError = no camera exposed to this context."]);
+            });
+        });
+
+        stopBtn.addEventListener("click", function () {
+          if (stream) {
+            stream.getTracks().forEach(function (t) {
+              t.stop();
+            });
+            stream = null;
+          }
+          video.srcObject = null;
+          video.removeAttribute("data-live");
+          stopBtn.disabled = true;
+          setStatus("statusA", "idle", "STOPPED");
+        });
+
+        // ---- Probes B and C: file inputs ---------------------------------
+        function wireFileInput(inputId, imgId, statusId, resultId) {
+          var input = document.getElementById(inputId);
+          var img = document.getElementById(imgId);
+
+          input.addEventListener("change", function () {
+            var file = input.files && input.files[0];
+
+            if (!file) {
+              setStatus(statusId, "fail", "NO FILE");
+              write(resultId, ["The picker closed without returning a file (cancelled, or the picker failed)."]);
+              return;
+            }
+
+            setStatus(statusId, "pass", "FILE RECEIVED");
+            write(resultId, [describeFile(file)]);
+
+            if (img.src) URL.revokeObjectURL(img.src);
+            img.src = URL.createObjectURL(file);
+          });
+        }
+
+        wireFileInput("captureInput", "shotB", "statusB", "resultB");
+        wireFileInput("fileInput", "shotC", "statusC", "resultC");
+      })();
+    </script>
+  </body>
+</html>
