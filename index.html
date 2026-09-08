@@ -127,6 +127,55 @@
       pre:empty {
         display: none;
       }
+      .dl-row {
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+        margin-top: 10px;
+      }
+      .dl-row:first-of-type {
+        border-top: 0;
+        margin-top: 0;
+      }
+      .dl-label {
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .dl-url {
+        display: block;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--muted);
+        word-break: break-all;
+        margin: 2px 0 8px;
+      }
+      .dl-buttons {
+        display: flex;
+        gap: 8px;
+      }
+      .dl-buttons > * {
+        flex: 1;
+        margin-bottom: 0;
+      }
+      a.btn {
+        display: block;
+        text-align: center;
+        text-decoration: none;
+        font-weight: 600;
+        color: #fff;
+        background: #1a56db;
+        border-radius: 10px;
+        padding: 14px 18px;
+      }
+      input[type="text"] {
+        display: block;
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 8px;
+        font: inherit;
+        color: var(--ink);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
       video,
       img.shot {
         display: block;
@@ -145,12 +194,37 @@
   </head>
   <body>
     <h1>INV-1382 camera probe</h1>
-    <p class="sub">Build v1 · 2026-09-07 · <span id="origin"></span></p>
+    <p class="sub">Build v2 · 2026-09-08 · <span id="origin"></span></p>
 
     <section>
       <h2>Environment</h2>
       <p class="hint">Captured on load. Screenshot this along with each probe result.</p>
       <pre id="diagnostics">collecting…</pre>
+    </section>
+
+    <section>
+      <h2>Probe D — return-to-app deep link</h2>
+      <p class="hint">
+        Simulates the deep link on Northrow's success page. "Link" is a real anchor tap; "Script" sets
+        window.location.href, which is how the app itself fires deep links. Some browsers allow one and block the other.
+      </p>
+      <div id="deepLinks"></div>
+
+      <div class="dl-row">
+        <span class="dl-label">Custom</span>
+        <span class="dl-url">Try any deepLink value without a redeploy</span>
+        <input id="customValue" type="text" placeholder="e.g. investments" autocapitalize="off" autocorrect="off" spellcheck="false" />
+        <div class="dl-buttons">
+          <a class="btn" id="customLink" href="#">Link</a>
+          <button id="customScript">Script</button>
+        </div>
+      </div>
+
+      <p class="hint" style="margin-top: 12px">
+        Watch for: does the overlay close by itself, is the app resumed or cold-started, and does it land on the right screen?
+      </p>
+      <span class="status idle" id="statusD">NOT RUN</span>
+      <pre id="resultD"></pre>
     </section>
 
     <section>
@@ -266,6 +340,124 @@
               });
           }
         })();
+
+        // ---- Probe D: return-to-app deep link ----------------------------
+        var DEEP_LINKS = [
+          { label: "Bare scheme", url: "MSMMoreMoney://" },
+          { label: "Savings (known-good control)", url: "MSMMoreMoney://?deepLink=savings" },
+          { label: "Investments (unverified)", url: "MSMMoreMoney://?deepLink=investments" },
+          { label: "Invest (unverified)", url: "MSMMoreMoney://?deepLink=invest" },
+        ];
+
+        var events = [];
+        var pendingTimer = null;
+
+        function stamp() {
+          var d = new Date();
+          return d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0");
+        }
+
+        function logEvent(msg) {
+          events.push(stamp() + "  " + msg);
+          write("resultD", events.slice(-14));
+        }
+
+        function attempt(method, url) {
+          setStatus("statusD", "running", "ATTEMPTED");
+          logEvent("attempt (" + method + "): " + url);
+
+          if (pendingTimer) clearTimeout(pendingTimer);
+          pendingTimer = setTimeout(function () {
+            if (document.visibilityState === "visible") {
+              setStatus("statusD", "fail", "NO HANDOFF");
+              logEvent("still visible after 2.5s — the OS did not hand off to the app");
+            }
+          }, 2500);
+        }
+
+        (function renderDeepLinks() {
+          var host = document.getElementById("deepLinks");
+
+          DEEP_LINKS.forEach(function (item, i) {
+            var row = document.createElement("div");
+            row.className = "dl-row";
+
+            var label = document.createElement("span");
+            label.className = "dl-label";
+            label.textContent = item.label;
+
+            var url = document.createElement("span");
+            url.className = "dl-url";
+            url.textContent = item.url;
+
+            var buttons = document.createElement("div");
+            buttons.className = "dl-buttons";
+
+            var link = document.createElement("a");
+            link.className = "btn";
+            link.href = item.url;
+            link.textContent = "Link";
+            link.addEventListener("click", function () {
+              attempt("anchor", item.url);
+            });
+
+            var btn = document.createElement("button");
+            btn.textContent = "Script";
+            btn.addEventListener("click", function () {
+              attempt("script", item.url);
+              window.location.href = item.url;
+            });
+
+            buttons.appendChild(link);
+            buttons.appendChild(btn);
+            row.appendChild(label);
+            row.appendChild(url);
+            row.appendChild(buttons);
+            host.appendChild(row);
+          });
+        })();
+
+        (function wireCustom() {
+          var input = document.getElementById("customValue");
+          var link = document.getElementById("customLink");
+          var btn = document.getElementById("customScript");
+
+          function build() {
+            var v = input.value.trim();
+            return v ? "MSMMoreMoney://?deepLink=" + encodeURIComponent(v) : "MSMMoreMoney://";
+          }
+
+          input.addEventListener("input", function () {
+            link.href = build();
+          });
+          link.href = build();
+
+          link.addEventListener("click", function () {
+            link.href = build();
+            attempt("anchor", link.href);
+          });
+
+          btn.addEventListener("click", function () {
+            var url = build();
+            attempt("script", url);
+            window.location.href = url;
+          });
+        })();
+
+        // A handoff backgrounds this page; returning to it fires these again.
+        document.addEventListener("visibilitychange", function () {
+          logEvent("visibilitychange -> " + document.visibilityState);
+          if (document.visibilityState === "hidden") {
+            if (pendingTimer) clearTimeout(pendingTimer);
+            setStatus("statusD", "pass", "HANDED OFF");
+          }
+        });
+        window.addEventListener("pagehide", function () {
+          logEvent("pagehide — page is being unloaded or cached");
+        });
+        window.addEventListener("pageshow", function (e) {
+          logEvent("pageshow (from bfcache: " + e.persisted + ")");
+        });
 
         // ---- Probe A: getUserMedia ---------------------------------------
         var stream = null;
