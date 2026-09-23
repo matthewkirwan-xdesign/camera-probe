@@ -194,7 +194,7 @@
   </head>
   <body>
     <h1>INV-1382 camera probe</h1>
-    <p class="sub">Build v2 · 2026-09-08 · <span id="origin"></span></p>
+    <p class="sub">Build v3 · 2026-09-23 · <span id="origin"></span></p>
 
     <section>
       <h2>Environment</h2>
@@ -207,6 +207,8 @@
       <p class="hint">
         Simulates the deep link on Northrow's success page. "Link" is a real anchor tap; "Script" sets
         window.location.href, which is how the app itself fires deep links. Some browsers allow one and block the other.
+        The AppsFlyer OneLink is an https URL rather than a custom scheme, so "Link" and "Script" navigate this page away
+        to AppsFlyer before it hands off to the app — use "New tab" if you want this log to survive.
       </p>
       <div id="deepLinks"></div>
 
@@ -225,6 +227,7 @@
       </p>
       <span class="status idle" id="statusD">NOT RUN</span>
       <pre id="resultD"></pre>
+      <button id="clearD" class="secondary" style="margin-top: 8px">Clear log</button>
     </section>
 
     <section>
@@ -347,10 +350,18 @@
           { label: "Savings (known-good control)", url: "MSMMoreMoney://?deepLink=savings" },
           { label: "Investments (unverified)", url: "MSMMoreMoney://?deepLink=investments" },
           { label: "Invest (unverified)", url: "MSMMoreMoney://?deepLink=invest" },
+          { label: "AppsFlyer OneLink — Savings", url: "https://msmgo.onelink.me/cbxB/ky8cm6yo" },
         ];
 
-        var events = [];
+        var LOG_KEY = "inv1382-probe-d-log";
         var pendingTimer = null;
+        var events = [];
+
+        try {
+          events = JSON.parse(sessionStorage.getItem(LOG_KEY)) || [];
+        } catch (e) {
+          events = [];
+        }
 
         function stamp() {
           var d = new Date();
@@ -359,8 +370,29 @@
 
         function logEvent(msg) {
           events.push(stamp() + "  " + msg);
+          try {
+            sessionStorage.setItem(LOG_KEY, JSON.stringify(events.slice(-40)));
+          } catch (e) {
+            // sessionStorage throws in private browsing; the on-screen log still works.
+          }
           write("resultD", events.slice(-14));
         }
+
+        if (events.length) {
+          write("resultD", events.slice(-14));
+          logEvent("page loaded — log restored from a previous attempt");
+        }
+
+        document.getElementById("clearD").addEventListener("click", function () {
+          events = [];
+          try {
+            sessionStorage.removeItem(LOG_KEY);
+          } catch (e) {
+            // ignore
+          }
+          write("resultD", []);
+          setStatus("statusD", "idle", "NOT RUN");
+        });
 
         function attempt(method, url) {
           setStatus("statusD", "running", "ATTEMPTED");
@@ -410,6 +442,19 @@
 
             buttons.appendChild(link);
             buttons.appendChild(btn);
+
+            if (/^https?:/.test(item.url)) {
+              var tab = document.createElement("button");
+              tab.className = "secondary";
+              tab.textContent = "New tab";
+              tab.addEventListener("click", function () {
+                attempt("window.open", item.url);
+                if (!window.open(item.url, "_blank")) {
+                  logEvent("window.open returned null — blocked by this browser");
+                }
+              });
+              buttons.appendChild(tab);
+            }
             row.appendChild(label);
             row.appendChild(url);
             row.appendChild(buttons);
